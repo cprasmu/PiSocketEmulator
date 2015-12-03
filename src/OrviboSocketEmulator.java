@@ -24,90 +24,49 @@ import com.pi4j.io.gpio.RaspiPin;
 
 /**
  * OrviboSocket Emulator
- * @author cprasmu@gmail.com
- * @version 1.0.0
+ * @author Peter Rasmussen November 2015
+ * @version 1.0.1
  */
 
 public class OrviboSocketEmulator implements TimeoutReciever{
-	
-	private static final String MAGIC_KEY = "6864";
-	
-	private final  GpioController gpio = GpioFactory.getInstance();
-	private GpioPinDigitalOutput piPin ;
-	
-	private static  InetAddress serverIp; 
-	private static final String PAD16="                ";
-	private static final String PAD40="                                        ";
-	private static final byte [] PORT10K =	{0x10,0x27};
-	
-	
-	public enum OrviboCmd {
-		
-		MSG_COUNT_DOWN	("cd","Count Down"),
-		MSG_SUB_CNF 	("cl","Subscription response received"),
-		MSG_CLK_SYNC 	("cs","Clock Sync"),
-		MSG_STATE_CNG	("dc","Change State"),
-		MSG_DI 			("di","AllOne Button Press"),
-		MSG_REG_SVR 	("dl","Register Server"),
-		MSG_DN 			("dn","DN - 646E"),
-		MSG_HEARTBEAT 	("hb","Heartbeat"),
-		MSG_IR_CODE 	("ic","IR Control Command"),
-		MSG_IR 			("ir","Check IR command"),
-	    MSG_BTN_PRESS 	("ls","BTN-PRESS 6C73"),
-		MSG_MOD_PASS 	("mp","Modify Password"),
-		MSG_QUERY_ALL 	("qa","Query All"),
-		MSG_DISCOVER	("qg","Discover Device"),
-		MSG_STATE_CNF	("sf","State Confirm"),
-		MSG_READ_TABLE 	("rt","Read Table"),
-		MSG_MOD_TABLE	("tm","Modify Table"),
-		MSG_UL			("ul","UL 756C"),
-		MSG_UR			("ur","UR 7572");
-		
-		private String command;
-		private String description;
-		
-		 OrviboCmd(String command,String description){
-			this.command = command;
-			this.description = description;
-		}
-		
-		public String toString(){
-			return this.command + " : " + this.description;
-		}
-		
-		public static OrviboCmd valueOf(byte [] bytes,int offset){	
-			 byte [] head = {bytes[offset],bytes[offset+1]};
-			 return OrviboCmd.fromString(new String( head));
-		}
-		
-		private static final Map<String, OrviboCmd> fromString = new HashMap<>();
-	    static {
-	        for (OrviboCmd cmd : values()) {
-	            fromString.put(cmd.command, cmd);
-	        }
-	    }
 
-	    public static OrviboCmd fromString(String rep) {
-	        return fromString.get(rep);
-	    }
-	}
+	public static final String PROP_PASWD  = "password";
+	public static final String PROP_GATWY  = "gateway";
+	public static final String PROP_TIMZN  = "timezone";
+	public static final String PROP_DAYST  = "dst";
+	public static final String PROP_DNAME  = "deviceName";
+	public static final String PROP_DISCO  = "discoverable";
+	public static final String PROP_STATE  = "state";
+	public static final String PROP_NETIF  = "networkInterface";
+	public static final String PROP_OPPIN  = "outputPin";
+	public static final String PROP_USSVR  = "useServer";
 	
-	private DatagramSocket  scktServer ; 		// For receiving data
-	private InetAddress 	localIP; 			// Get our local IP address
-	private InetAddress 	broadcastip; 		// Where we'll send our "discovery" packet
-	private Timer heartbeatSender  = null;
+	private final  GpioController 	gpio = GpioFactory.getInstance();
+	private GpioPinDigitalOutput 	piPin ;
 	
-	private byte state = 1;
-	private byte[] receiveData 	= new byte[256];
-    private byte[] mac 			= new byte[6];
-    private byte[] macRev 		= new byte[6];
-    private int timezone = 0;
-    private int dst = 0;
-    private byte discoverable = (byte)1;
-    private Properties properties = new Properties(); 
+	private static  InetAddress 	serverIp; 
+	private static final String 	PAD16="                ";
+	private static final String 	PAD40="                                        ";
+	private static final byte [] 	PORT10K =	{0x10,0x27};
+	
+	private DatagramSocket  		scktServer ; 		// For receiving data
+	private InetAddress 			localIP; 			// Get our local IP address
+	//private InetAddress 			broadcastip; 		
+	private Timer 					heartbeatSender  = null;
+	
+	private byte 					state = 1;
+	private byte[] 					receiveData 	= new byte[256];
+    private byte[] 					mac 			= new byte[6];
+    private byte[] 					macRev 		= new byte[6];
+    private int 					timezone = 0;
+    private int 					dst = 0;
+    private byte 					discoverable = (byte)1;
+    private boolean 				useServer = false;
+    
+    private Properties 				properties = new Properties(); 
 	private Thread listener;
 	private String networkInterface = "wlan0";
-	private boolean useServer = false;
+	
 	
 	private static final int port = 10000; // The port we'll connect on
 	private static final byte [] twenties = {0x20, 0x20, 0x20, 0x20, 0x20, 0x20}; // this appears at the end of a few packets we send, so put it here for shortness of code
@@ -115,16 +74,13 @@ public class OrviboSocketEmulator implements TimeoutReciever{
 	private static String password 		= "888888";
 	private static String deviceName 	= "PISocket";
 	private static String serverDomain 	= "vicenter.orvibo.com";
-	private static String gateway 		= "192.168.2.1";
+	private static String gateway 		= "192.168.1.254";
 	private static String unknowMsg     = "com.orvibo.InfraredRemote";
 	private static String unknowDest	= "52.28.25.255";
 	private static int    unknownPort 	= 47820;
-	
 	private boolean allOne = false;
 	private volatile HashMap<String,SocketClient> subscribers = new HashMap<String,SocketClient>();
-	private Pin outputPin=null;
-	
-	//private int ioPin = 8;
+	private Pin outputPin = null;
 	
 	private void addUpdateClient(InetAddress ipAddress,int port) {
 		System.out.println("AddUpdate " + ipAddress);
@@ -156,29 +112,27 @@ public class OrviboSocketEmulator implements TimeoutReciever{
 		
 		File f = new File("orvibo.properties");
 		
-		if(!f.exists()){
+		if (!f.exists()) {
 			try {
 				f.createNewFile();
 			} catch (IOException e) {
-				// TODO Auto-generated catch block
 				e.printStackTrace();
 			}
 		}
 		
-		properties.setProperty("passwoprd", 	password);
-		properties.setProperty("deviceName", 	deviceName);
-		properties.setProperty("gateway", 		gateway);
-		properties.setProperty("timezone", 		""+timezone);
-		properties.setProperty("dst", 			""+dst);
-		properties.setProperty("discoverable", 	""+discoverable);
-		properties.setProperty("state", 		""+state);
-		properties.setProperty("networkInterface", networkInterface);
-		properties.setProperty("outputPin", 	outputPin.getName());
-		
+		properties.setProperty(PROP_PASWD, 	password);
+		properties.setProperty(PROP_DNAME, 	deviceName);
+		properties.setProperty(PROP_GATWY, 	gateway);
+		properties.setProperty(PROP_TIMZN, 	""+timezone);
+		properties.setProperty(PROP_DAYST, 	""+dst);
+		properties.setProperty(PROP_DISCO, 	""+discoverable);
+		properties.setProperty(PROP_STATE, 	""+state);
+		properties.setProperty(PROP_NETIF,  networkInterface);
+		properties.setProperty(PROP_OPPIN, 	outputPin.getName());
+
 		try {
 			properties.store(new FileWriter("orvibo.properties"),"Modified: "+ new Date());
 		} catch (IOException e) {
-			// TODO Auto-generated catch block
 			e.printStackTrace();
 		}
 		
@@ -192,7 +146,6 @@ public class OrviboSocketEmulator implements TimeoutReciever{
 			try {
 				f.createNewFile();
 			} catch (IOException e) {
-				// TODO Auto-generated catch block
 				e.printStackTrace();
 			}
 		}
@@ -200,26 +153,22 @@ public class OrviboSocketEmulator implements TimeoutReciever{
 		try {
 			properties.load(new FileReader("orvibo.properties"));
 		} catch (FileNotFoundException e) {
-			// TODO Auto-generated catch block
+			System.err.println("Can't find properties file!");
 			e.printStackTrace();
 		} catch (IOException e) {
-			// TODO Auto-generated catch block
 			e.printStackTrace();
 		}
 		
-		password 		= properties.getProperty("passwoprd", 	password);
-		deviceName 		= properties.getProperty("deviceName", 	deviceName);
-		gateway 		= properties.getProperty("gateway", 	gateway);
-		timezone 		= Integer.parseInt(properties.getProperty("timezone", 		"" + timezone));
-		dst 			= Integer.parseInt(properties.getProperty("dst", 			"" + dst));
-		discoverable 	= (byte) Integer.parseInt(properties.getProperty("discoverable", 	"" + discoverable));
-		state 			= (byte) Integer.parseInt(properties.getProperty("state", 		"" + state));
-		networkInterface = properties.getProperty("networkInterface", networkInterface);
-		useServer 		= Boolean.parseBoolean(properties.getProperty("useServer", "false"));
-		
-		outputPin 		= RaspiPin.getPinByName(properties.getProperty("outputPin","GPIO 8"));
-		
-		System.out.println("" + outputPin.toString());
+		password 		= properties.getProperty(PROP_PASWD ,	password);
+		deviceName 		= properties.getProperty(PROP_DNAME, 	deviceName);
+		gateway 		= properties.getProperty(PROP_GATWY, 	gateway);
+		timezone 		= Integer.parseInt(properties.getProperty(PROP_TIMZN, 		"" + timezone));
+		dst 			= Integer.parseInt(properties.getProperty(PROP_DAYST, 			"" + dst));
+		discoverable 	= (byte) Integer.parseInt(properties.getProperty(PROP_DISCO, 	"" + discoverable));
+		state 			= (byte) Integer.parseInt(properties.getProperty(PROP_STATE, 		"" + state));
+		networkInterface = properties.getProperty(PROP_NETIF, networkInterface);
+		useServer 		= Boolean.parseBoolean(properties.getProperty(PROP_USSVR, "false"));
+		outputPin 		= RaspiPin.getPinByName(properties.getProperty(PROP_OPPIN,"GPIO 8"));
 		
 	}
 	
@@ -234,7 +183,7 @@ public class OrviboSocketEmulator implements TimeoutReciever{
 			
 			serverIp 	= InetAddress.getByName("vicenter.orvibo.com");
 			localIP 	= InetAddress.getLocalHost();
-			broadcastip = InetAddress.getByName("255.255.255.255");
+			//broadcastip = InetAddress.getByName("255.255.255.255");
 			
 			System.out.println("Loacal IP : " + localIP);
 	
@@ -563,11 +512,11 @@ public class OrviboSocketEmulator implements TimeoutReciever{
 	
 	public void switchRelay(boolean state){
 
-			 if (state==true) {
-				 piPin.low();
-			 } else {
-				 piPin.high();
-			 } 
+		 if (state==true) {
+			 piPin.low();
+		 } else {
+			 piPin.high();
+		 } 
 	}
 	
 	
@@ -577,10 +526,10 @@ public class OrviboSocketEmulator implements TimeoutReciever{
 	    //686400176463A820663A34202020202020200000000001
 
 		if (rxbytes.length==30){
-			int sw = rxbytes[25];
-			state = rxbytes[24];
-			System.out.println("Switch : " + sw + " \t State " + state);
-			byte [] req= {rxbytes[22],rxbytes[23],rxbytes[24],rxbytes[25],rxbytes[26],rxbytes[27],rxbytes[28],rxbytes[29]};
+			//int sw 	= rxbytes[25];
+			state 	= rxbytes[24];
+			//System.out.println("Switch : " + sw + " \t State " + state);
+			//byte [] req = {rxbytes[22],rxbytes[23],rxbytes[24],rxbytes[25],rxbytes[26],rxbytes[27],rxbytes[28],rxbytes[29]};
 		} else {
 			state = rxbytes[22];
 		}
@@ -623,19 +572,6 @@ public class OrviboSocketEmulator implements TimeoutReciever{
 		modifyTableResponse(ipAddress);
 	}
 	
-	
-	/*
-	public void powerResponseAllOne(InetAddress ipAddress, byte[] macAddr,byte state,byte[] reqId){
-		
-		byte [] start 	=   {0x64, 0x63};
-		byte [] tmp		=	Utils.concat(start,macAddr);
-		tmp				=	Utils.concat(tmp,twenties);
-		byte[] end 		=   {0,0,0,0}; 
-		tmp				=	Utils.concat(tmp,end);
-		tmp				=	Utils.concat(tmp,reqId);
-		sendMessage(tmp,ipAddress);
-	}
-	*/
 	public void powerResponseConfirm(InetAddress ipAddress){
 		powerResponseConfirm( ipAddress, port);
 	}
@@ -649,19 +585,7 @@ public class OrviboSocketEmulator implements TimeoutReciever{
 		tmp				=	Utils.concat(tmp,end);
 		sendMessage(tmp,ipAddress,port);
 	}
-	/*
-	public void powerResponseConfirmAllOne(InetAddress ipAddress,byte[] reqId){
-		
-		byte [] start 	=   {0x73, 0x66};
-		byte [] tmp		=	Utils.concat(start,mac);
-		tmp				=	Utils.concat(tmp,twenties);
-		byte[] end 		=   {0,0,0,0}; 
-		tmp				=	Utils.concat(tmp,end);
-		tmp				=	Utils.concat(tmp,reqId);
-		//6864001E6463A820663A3420202020202020 00 00 00 00 B647012C0028F1F9
-		sendMessage(tmp,ipAddress);
-	}
-	*/
+	
 	public void heartbeatResponse(InetAddress ipAddress,byte token){
 		//System.out.println("Heartbeat : " + token);
 		byte [] start 	=   {0x68, 0x62};
@@ -721,7 +645,6 @@ public class OrviboSocketEmulator implements TimeoutReciever{
 					DatagramPacket receivePacket = new DatagramPacket(receiveData, receiveData.length);
 					scktServer.receive(receivePacket);    
 					InetAddress iPAddress = receivePacket.getAddress();
-					int rxPort = receivePacket.getPort();
 				   
 					if (!iPAddress.equals(localIP) && (receiveData[0]==0x68) && (receiveData[1]==0x64) && (receivePacket.getLength()>4)) {
 					   
@@ -747,7 +670,7 @@ public class OrviboSocketEmulator implements TimeoutReciever{
 					   			break;
 					
 					   		case MSG_SUB_CNF:
-					   			addUpdateClient(iPAddress,rxPort);
+					   			addUpdateClient(iPAddress, receivePacket.getPort());
 					   			System.out.println("Subscribe!");
 					   			subscribeResponse(iPAddress);
 					   			break;
@@ -807,5 +730,56 @@ public class OrviboSocketEmulator implements TimeoutReciever{
 				subscribers.remove(caller.toString());
 			}
 		}
+	}
+	
+	public enum OrviboCmd {
+		
+		MSG_COUNT_DOWN	("cd","Count Down"),
+		MSG_SUB_CNF 	("cl","Subscription response received"),
+		MSG_CLK_SYNC 	("cs","Clock Sync"),
+		MSG_STATE_CNG	("dc","Change State"),
+		MSG_DI 			("di","AllOne Button Press"),
+		MSG_REG_SVR 	("dl","Register Server"),
+		MSG_DN 			("dn","DN - 646E"),
+		MSG_HEARTBEAT 	("hb","Heartbeat"),
+		MSG_IR_CODE 	("ic","IR Control Command"),
+		MSG_IR 			("ir","Check IR command"),
+	    MSG_BTN_PRESS 	("ls","BTN-PRESS 6C73"),
+		MSG_MOD_PASS 	("mp","Modify Password"),
+		MSG_QUERY_ALL 	("qa","Query All"),
+		MSG_DISCOVER	("qg","Discover Device"),
+		MSG_STATE_CNF	("sf","State Confirm"),
+		MSG_READ_TABLE 	("rt","Read Table"),
+		MSG_MOD_TABLE	("tm","Modify Table"),
+		MSG_UL			("ul","UL 756C"),
+		MSG_UR			("ur","UR 7572");
+		
+		private String command;
+		private String description;
+		
+		 OrviboCmd(String command,String description){
+			this.command = command;
+			this.description = description;
+		}
+		
+		public String toString(){
+			return this.command + " : " + this.description;
+		}
+		
+		public static OrviboCmd valueOf(byte [] bytes,int offset){	
+			 byte [] head = {bytes[offset],bytes[offset+1]};
+			 return OrviboCmd.fromString(new String( head));
+		}
+		
+		private static final Map<String, OrviboCmd> fromString = new HashMap<>();
+	    static {
+	        for (OrviboCmd cmd : values()) {
+	            fromString.put(cmd.command, cmd);
+	        }
+	    }
+
+	    public static OrviboCmd fromString(String rep) {
+	        return fromString.get(rep);
+	    }
 	}
 }
