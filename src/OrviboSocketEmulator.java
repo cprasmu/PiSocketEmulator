@@ -3,15 +3,11 @@ import java.io.FileNotFoundException;
 import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
-import java.io.Reader;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.net.NetworkInterface;
-import java.net.SocketException;
 import java.net.UnknownHostException;
-import java.nio.ByteBuffer;
-import java.util.Calendar;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
@@ -23,12 +19,8 @@ import com.pi4j.io.gpio.GpioController;
 import com.pi4j.io.gpio.GpioFactory;
 import com.pi4j.io.gpio.GpioPin;
 import com.pi4j.io.gpio.GpioPinDigitalOutput;
+import com.pi4j.io.gpio.Pin;
 import com.pi4j.io.gpio.RaspiPin;
-
-//import com.pi4j.io.gpio.GpioController;
-//import com.pi4j.io.gpio.GpioFactory;
-//import com.pi4j.io.gpio.GpioPinDigitalOutput;
-
 
 /**
  * OrviboSocket Emulator
@@ -98,11 +90,7 @@ public class OrviboSocketEmulator implements TimeoutReciever{
 	    public static OrviboCmd fromString(String rep) {
 	        return fromString.get(rep);
 	    }
-		
-	    
 	}
-
-
 	
 	private DatagramSocket  scktServer ; 		// For receiving data
 	private InetAddress 	localIP; 			// Get our local IP address
@@ -133,10 +121,10 @@ public class OrviboSocketEmulator implements TimeoutReciever{
 	private static int    unknownPort 	= 47820;
 	
 	private boolean allOne = false;
-
 	private volatile HashMap<String,SocketClient> subscribers = new HashMap<String,SocketClient>();
+	private Pin outputPin=null;
 	
-	private int ioPin = 8;
+	//private int ioPin = 8;
 	
 	private void addUpdateClient(InetAddress ipAddress,int port) {
 		System.out.println("AddUpdate " + ipAddress);
@@ -164,7 +152,6 @@ public class OrviboSocketEmulator implements TimeoutReciever{
 				"\tDiscoverable \t : " + discoverable ;
 	}
 	
-	
 	public void saveProperties(){
 		
 		File f = new File("orvibo.properties");
@@ -186,6 +173,7 @@ public class OrviboSocketEmulator implements TimeoutReciever{
 		properties.setProperty("discoverable", 	""+discoverable);
 		properties.setProperty("state", 		""+state);
 		properties.setProperty("networkInterface", networkInterface);
+		properties.setProperty("outputPin", 	outputPin.getName());
 		
 		try {
 			properties.store(new FileWriter("orvibo.properties"),"Modified: "+ new Date());
@@ -228,6 +216,11 @@ public class OrviboSocketEmulator implements TimeoutReciever{
 		state 			= (byte) Integer.parseInt(properties.getProperty("state", 		"" + state));
 		networkInterface = properties.getProperty("networkInterface", networkInterface);
 		useServer 		= Boolean.parseBoolean(properties.getProperty("useServer", "false"));
+		
+		outputPin 		= RaspiPin.getPinByName(properties.getProperty("outputPin","GPIO 8"));
+		
+		System.out.println("" + outputPin.toString());
+		
 	}
 	
 
@@ -267,7 +260,7 @@ public class OrviboSocketEmulator implements TimeoutReciever{
 				registerWithServer(InetAddress.getByName(serverDomain));
 			}
 
-			setupPins();
+			setupPins(outputPin);
 			switchRelay(state==1);
 			
 		} catch (UnknownHostException e) {e.printStackTrace();}
@@ -309,6 +302,7 @@ public class OrviboSocketEmulator implements TimeoutReciever{
 			e.printStackTrace();
 		}
 	}
+	
 	public static void main(String [] args){
 		try {
 			OrviboSocketEmulator s = new OrviboSocketEmulator();
@@ -316,7 +310,6 @@ public class OrviboSocketEmulator implements TimeoutReciever{
 			e.printStackTrace();
 		}
 	}
-
 	
 	public void queryAllResposne(InetAddress ipAddress){
 		
@@ -349,7 +342,7 @@ public class OrviboSocketEmulator implements TimeoutReciever{
 		tmp				=	Utils.concat(tmp,	macRev);
 		tmp				=	Utils.concat(tmp,	twenties);
 		byte [] end 	=   {0x53,0x4f,0x43,0x30,0x30,0x32};
-		byte [] endAllone  	=    {0x49, 0x52, 0x44, 0x30, 0x30, 0x35};
+		byte [] endAllone  	= {0x49, 0x52, 0x44, 0x30, 0x30, 0x35};
 		//byte [] end  	=   {0x49, 0x52, 0x44, 0x30, 0x30, 0x35};
 		//byte [] end2 = {(byte)0xd3,(byte)0xef,0x02,(byte)0xda,state};
 		byte [] timeData =  Utils.longToBytes(Utils.getTimeSince1900());
@@ -364,7 +357,6 @@ public class OrviboSocketEmulator implements TimeoutReciever{
 
 		sendMessage(tmp,ipAddress);
 	}
-	
 
 	/*
 	public void subscribeUnknown(InetAddress ipAddress, byte[] macAddr){
@@ -377,6 +369,7 @@ public class OrviboSocketEmulator implements TimeoutReciever{
 		sendMessage(tmp,ipAddress);
 	}
 	*/
+	
 	public void subscribeResponse(InetAddress ipAddress){
 
 		byte [] start 	=   {0x63, 0x6c};
@@ -517,7 +510,7 @@ public class OrviboSocketEmulator implements TimeoutReciever{
 			//68 64 00 37 74 6D A8 20 66 3A 34 20 20 20 20 20 20 20 00 00 00 00 0300001C001158202020202020202020202020202020200000DF070B1D111437FF
 		} else if (table==4) {
 			String newDeviceName=   "";
-			for (int i=67;i<86;i++){
+			for (int i=67;i<85;i++){
 				newDeviceName = newDeviceName + (char) rxbytes[i];
 			}
 			
@@ -550,7 +543,7 @@ public class OrviboSocketEmulator implements TimeoutReciever{
 		saveProperties();
 	}
 	
-	public void setupPins() {
+	public void setupPins(Pin outputPin) {
 		
 		gpio.shutdown();
 		GpioPin gppin=null;
@@ -563,8 +556,7 @@ public class OrviboSocketEmulator implements TimeoutReciever{
 			gpio.unprovisionPin(gppin);
 		}
 		
-
-		piPin = gpio.provisionDigitalOutputPin(RaspiPin.GPIO_08, "MyLE2D");
+		piPin = gpio.provisionDigitalOutputPin(outputPin, "OUTPUT1");
 		
 	}
 	
