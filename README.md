@@ -38,12 +38,12 @@ Please remember that this is beta software. It has been built and tested against
 To-Do:
 ======
 
-* ~~Implement Tables 1 & 3~~
-* ~~AllOne mode switch response~~
-* ~~Acknowledge password change messages~~
-* ~~Fix initial state issues~~
-* ~~Implement use of password~~
-* ~~Icon change?~~
+* Implement Tables 1 & 3
+* AllOne mode switch response
+* Acknowledge password change messages
+* Fix initial state issues
+* Implement use of password
+* Icon change?
 
 
 Supporting development
