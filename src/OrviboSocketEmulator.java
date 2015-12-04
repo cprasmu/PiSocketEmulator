@@ -8,6 +8,7 @@ import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.net.NetworkInterface;
 import java.net.UnknownHostException;
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
@@ -29,58 +30,60 @@ import com.pi4j.io.gpio.RaspiPin;
  */
 
 public class OrviboSocketEmulator implements TimeoutReciever{
-
-	public static final String PROP_PASWD  = "password";
-	public static final String PROP_GATWY  = "gateway";
-	public static final String PROP_TIMZN  = "timezone";
-	public static final String PROP_DAYST  = "dst";
-	public static final String PROP_DNAME  = "deviceName";
-	public static final String PROP_DISCO  = "discoverable";
-	public static final String PROP_STATE  = "state";
-	public static final String PROP_NETIF  = "networkInterface";
-	public static final String PROP_OPPIN  = "outputPin";
-	public static final String PROP_USSVR  = "useServer";
-	
-	private final  GpioController 	gpio = GpioFactory.getInstance();
-	private GpioPinDigitalOutput 	piPin ;
 	
 	private static  InetAddress 	serverIp; 
-	private static final String 	PAD16="                ";
-	private static final String 	PAD40="                                        ";
-	private static final byte [] 	PORT10K =	{0x10,0x27};
+	private static final String 	PAD16			= "                ";
+	private static final String 	PAD40			= "                                        ";
+	private static final byte [] 	PORT10K 		= {0x10,0x27};
 	
 	private DatagramSocket  		scktServer ; 		// For receiving data
 	private InetAddress 			localIP; 			// Get our local IP address
 	//private InetAddress 			broadcastip; 		
 	private Timer 					heartbeatSender  = null;
 	
-	private byte 					state = 1;
+	//Properties
+	private Properties 				properties 		= new Properties(); 
+	public static final String 		PROP_PASWD  	= "password";
+	public static final String 		PROP_GATWY  	= "gateway";
+	public static final String 		PROP_TIMZN  	= "timezone";
+	public static final String 		PROP_DAYST 		= "dst";
+	public static final String 		PROP_DNAME  	= "deviceName";
+	public static final String 		PROP_DISCO  	= "discoverable";
+	public static final String 		PROP_STATE  	= "state";
+	public static final String 		PROP_NETIF  	= "networkInterface";
+	public static final String 		PROP_OPPIN  	= "outputPin";
+	public static final String 		PROP_USSVR  	= "useServer";
+	private static String 			deviceName 		= "PISocket";
+	private static String 			gateway 		= "192.168.1.254";
+	private static String 			password 		= "888888";
+	private byte 					state 			= 1;
 	private byte[] 					receiveData 	= new byte[256];
     private byte[] 					mac 			= new byte[6];
-    private byte[] 					macRev 		= new byte[6];
-    private int 					timezone = 0;
-    private int 					dst = 0;
-    private byte 					discoverable = (byte)1;
-    private boolean 				useServer = false;
+    private byte[] 					macRev 			= new byte[6];
+    private int 					timezone 		= 0;
+    private int 					dst 			= 0;
+    private byte 					discoverable 	= (byte)1;
+    private boolean 				useServer 		= false;
     
-    private Properties 				properties = new Properties(); 
+    
 	private Thread listener;
-	private String networkInterface = "wlan0";
+	private String networkInterface 				= "wlan0";
+
+	private static final int 		port 			= 10000; // The port we'll connect on
+	private static final byte [] 	twenties 		= {0x20, 0x20, 0x20, 0x20, 0x20, 0x20}; // this appears at the end of a few packets we send, so put it here for shortness of code
+	private static final byte [] 	zeros 			= {0,0,0,0,0,0};
 	
+	private static String 			serverDomain 	= "vicenter.orvibo.com";
 	
-	private static final int port = 10000; // The port we'll connect on
-	private static final byte [] twenties = {0x20, 0x20, 0x20, 0x20, 0x20, 0x20}; // this appears at the end of a few packets we send, so put it here for shortness of code
-	private static final byte [] zeros = {0,0,0,0,0,0};
-	private static String password 		= "888888";
-	private static String deviceName 	= "PISocket";
-	private static String serverDomain 	= "vicenter.orvibo.com";
-	private static String gateway 		= "192.168.1.254";
-	private static String unknowMsg     = "com.orvibo.InfraredRemote";
-	private static String unknowDest	= "52.28.25.255";
-	private static int    unknownPort 	= 47820;
-	private boolean allOne = false;
+	private static String 			unknowMsg     	= "com.orvibo.InfraredRemote";
+	private static String 			unknowDest		= "52.28.25.255";
+	private static int    			unknownPort 	= 47820;
+	private boolean 				allOne 			= false;
 	private volatile HashMap<String,SocketClient> subscribers = new HashMap<String,SocketClient>();
-	private Pin outputPin = null;
+	//GPIO
+	private final  GpioController 	gpio 			= GpioFactory.getInstance();
+	private ArrayList<GpioPinDigitalOutput> outputPins = new ArrayList<GpioPinDigitalOutput>();
+	
 	
 	private void addUpdateClient(InetAddress ipAddress,int port) {
 		System.out.println("AddUpdate " + ipAddress);
@@ -128,8 +131,13 @@ public class OrviboSocketEmulator implements TimeoutReciever{
 		properties.setProperty(PROP_DISCO, 	""+discoverable);
 		properties.setProperty(PROP_STATE, 	""+state);
 		properties.setProperty(PROP_NETIF,  networkInterface);
-		properties.setProperty(PROP_OPPIN, 	outputPin.getName());
-
+		
+		for (int i=1; i<9; i++) {
+			if (properties.contains(PROP_OPPIN + i)){
+				properties.setProperty(PROP_OPPIN + i, outputPins.get(i-1).getName());
+			}
+		}
+		
 		try {
 			properties.store(new FileWriter("orvibo.properties"),"Modified: "+ new Date());
 		} catch (IOException e) {
@@ -168,11 +176,19 @@ public class OrviboSocketEmulator implements TimeoutReciever{
 		state 			= (byte) Integer.parseInt(properties.getProperty(PROP_STATE, 		"" + state));
 		networkInterface = properties.getProperty(PROP_NETIF, networkInterface);
 		useServer 		= Boolean.parseBoolean(properties.getProperty(PROP_USSVR, "false"));
-		outputPin 		= RaspiPin.getPinByName(properties.getProperty(PROP_OPPIN,"GPIO 8"));
 		
+		resetGPIO();
+	
+		for (int i=1; i<9; i++) {
+			if (properties.containsKey(PROP_OPPIN + i)){
+				Pin pin = RaspiPin.getPinByName(properties.getProperty(PROP_OPPIN + i,"GPIO " + (10-i)));
+				System.out.println("Found Pin : " + pin.getName());
+				GpioPinDigitalOutput piPin = gpio.provisionDigitalOutputPin(pin, pin.getName());
+				outputPins.add(piPin);
+			}
+		}
 	}
 	
-
 	
 	public OrviboSocketEmulator() throws Exception{
 		
@@ -209,8 +225,8 @@ public class OrviboSocketEmulator implements TimeoutReciever{
 				registerWithServer(InetAddress.getByName(serverDomain));
 			}
 
-			setupPins(outputPin);
-			switchRelay(state==1);
+			//setupPins(outputs);
+			switchRelay((state==1), 0);
 			
 		} catch (UnknownHostException e) {e.printStackTrace();}
 		
@@ -492,31 +508,34 @@ public class OrviboSocketEmulator implements TimeoutReciever{
 		saveProperties();
 	}
 	
-	public void setupPins(Pin outputPin) {
+	public void resetGPIO() {
 		
 		gpio.shutdown();
 		GpioPin gppin=null;
 		
-		for(GpioPin apin: gpio.getProvisionedPins()){
+		for (GpioPin apin: gpio.getProvisionedPins()){
 			gppin = apin;
+			if (gppin!=null){
+				gpio.unprovisionPin(gppin);
+			}
 		}
-		
-		if (gppin!=null){
-			gpio.unprovisionPin(gppin);
-		}
-		
-		piPin = gpio.provisionDigitalOutputPin(outputPin, "OUTPUT1");
-		
 	}
 	
 	
-	public void switchRelay(boolean state){
+	
+	
+	public void switchRelay(boolean state,int pinIndex) {
+		
+		if (outputPins.isEmpty()) {
+			System.out.println("Simulate switch pim :" +pinIndex + " , value : " + state);
+			return;
+		}
 
-		 if (state==true) {
-			 piPin.low();
-		 } else {
-			 piPin.high();
-		 } 
+		if (state==true) {
+			outputPins.get(pinIndex).low();
+		} else {
+			outputPins.get(pinIndex).high();
+		} 
 	}
 	
 	
@@ -524,11 +543,12 @@ public class OrviboSocketEmulator implements TimeoutReciever{
 
 		//6864001E6463A820663A342020202020202000000000CD01 00 2A 004EA3E9
 	    //686400176463A820663A34202020202020200000000001
-
+		int sw 	= 0;
+		
 		if (rxbytes.length==30){
-			//int sw 	= rxbytes[25];
-			state 	= rxbytes[24];
-			//System.out.println("Switch : " + sw + " \t State " + state);
+			sw 	= (rxbytes[25] - 0x2a);
+			state = rxbytes[24];
+			System.out.println("Switch : " + sw + " \t State " + state);
 			//byte [] req = {rxbytes[22],rxbytes[23],rxbytes[24],rxbytes[25],rxbytes[26],rxbytes[27],rxbytes[28],rxbytes[29]};
 		} else {
 			state = rxbytes[22];
@@ -541,7 +561,7 @@ public class OrviboSocketEmulator implements TimeoutReciever{
 			powerResponseConfirm(sc.getInetAddress(), sc.getPort());
 		}
 	
-		switchRelay(state==1);
+		switchRelay((state==1), sw);
 	
 		/////powerResponse(ipAddress,(byte)0);
 		/////powerResponseConfirm(ipAddress, port);
