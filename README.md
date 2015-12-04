@@ -16,17 +16,28 @@ This will start the application and generate a default properties file if there 
 Properties
 ==========
 
-networkInterface=wlan0
-deviceName=PiSocket
-passwoprd=888888
-discoverable=0
-timezone=0
-state=0
-gateway=192.168.1.254
-dst=1
-useServer=false
-outputPin1=GPIO 9
-outputPin2=GPIO 8
+networkInterface  = wlan0
+
+deviceName        = PiSocket
+
+passwoprd         = 888888
+
+discoverable      = 0
+
+timezone          = 0
+
+state             = 0
+
+gateway           = 192.168.1.254
+
+dst               = 1
+
+useServer         = false
+
+outputPin1        = GPIO 9
+
+outputPin2        = GPIO 8
+
 
 
 
