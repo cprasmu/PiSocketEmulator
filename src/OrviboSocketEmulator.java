@@ -5,12 +5,17 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
+import java.net.Inet4Address;
 import java.net.InetAddress;
+import java.net.InterfaceAddress;
 import java.net.NetworkInterface;
+import java.net.SocketException;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.Enumeration;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Timer;
@@ -35,10 +40,8 @@ public class OrviboSocketEmulator implements TimeoutReciever{
 	private static final String 	PAD16			= "                ";
 	private static final String 	PAD40			= "                                        ";
 	private static final byte [] 	PORT10K 		= {0x10,0x27};
-	
 	private DatagramSocket  		scktServer ; 		// For receiving data
-	private InetAddress 			localIP; 			// Get our local IP address
-	//private InetAddress 			broadcastip; 		
+	private InetAddress 			localIP; 			// Get our local IP address	
 	private Timer 					heartbeatSender  = null;
 	
 	//Properties
@@ -75,10 +78,10 @@ public class OrviboSocketEmulator implements TimeoutReciever{
 	
 	private static String 			serverDomain 	= "vicenter.orvibo.com";
 	
-	private static String 			unknowMsg     	= "com.orvibo.InfraredRemote";
+	private static String 			unknowDomain     = "com.orvibo.InfraredRemote";
 	private static String 			unknowDest		= "52.28.25.255";
 	private static int    			unknownPort 	= 47820;
-	private boolean 				allOne 			= false;
+	private boolean 				modeAllOne 		= false;
 	private volatile HashMap<String,SocketClient> subscribers = new HashMap<String,SocketClient>();
 	//GPIO
 	private final  GpioController 	gpio 			= GpioFactory.getInstance();
@@ -99,6 +102,39 @@ public class OrviboSocketEmulator implements TimeoutReciever{
 				}
 			}
 		}
+	}
+	
+	
+	public static String getNetworkAddress(String interfaceName){
+		
+		Enumeration<NetworkInterface> networkInterfaces;
+		try {
+			networkInterfaces = NetworkInterface.getNetworkInterfaces();
+		
+			while (networkInterfaces.hasMoreElements())
+			{
+			    NetworkInterface networkInterface = (NetworkInterface) networkInterfaces.nextElement();
+	
+			    List<InterfaceAddress> ia = networkInterface.getInterfaceAddresses();
+			    
+			    if (networkInterface.getDisplayName().equals(interfaceName)) {
+			    	for(int i=0;i<ia.size();i++){
+			    		InterfaceAddress address = ia.get(i);
+			    		if (address.getAddress() instanceof Inet4Address){
+			    			System.err.println("Using address : " + address.getAddress().getHostAddress() );
+			    			return address.getAddress().getHostAddress();
+			    		}
+			    	}
+			    }
+			}
+		
+		} catch (SocketException e) {
+			e.printStackTrace();
+		} 
+		
+		System.err.println("Failed to get address!");
+		
+		return null;
 	}
 	
 	public String printStatus() {
@@ -167,15 +203,15 @@ public class OrviboSocketEmulator implements TimeoutReciever{
 			e.printStackTrace();
 		}
 		
-		password 		= properties.getProperty(PROP_PASWD ,	password);
-		deviceName 		= properties.getProperty(PROP_DNAME, 	deviceName);
-		gateway 		= properties.getProperty(PROP_GATWY, 	gateway);
-		timezone 		= Integer.parseInt(properties.getProperty(PROP_TIMZN, 		"" + timezone));
-		dst 			= Integer.parseInt(properties.getProperty(PROP_DAYST, 			"" + dst));
-		discoverable 	= (byte) Integer.parseInt(properties.getProperty(PROP_DISCO, 	"" + discoverable));
-		state 			= (byte) Integer.parseInt(properties.getProperty(PROP_STATE, 		"" + state));
-		networkInterface = properties.getProperty(PROP_NETIF, networkInterface);
-		useServer 		= Boolean.parseBoolean(properties.getProperty(PROP_USSVR, "false"));
+		password 		= 	properties.getProperty(PROP_PASWD ,	password);
+		deviceName 		=   properties.getProperty(PROP_DNAME, 	deviceName);
+		gateway 		=   properties.getProperty(PROP_GATWY, 	gateway);
+		timezone 		= Integer.parseInt( properties.getProperty(PROP_TIMZN, 		"" + timezone));
+		dst 			= Integer.parseInt( properties.getProperty(PROP_DAYST, 		"" + dst));
+		discoverable 	= (byte) Integer.parseInt(properties.getProperty(PROP_DISCO,"" + discoverable));
+		state 			= (byte) Integer.parseInt(properties.getProperty(PROP_STATE,"" + state));
+		networkInterface = 			properties.getProperty(PROP_NETIF, networkInterface);
+		useServer 		= Boolean.parseBoolean(   properties.getProperty(PROP_USSVR, "false"));
 		
 		resetGPIO();
 	
@@ -198,12 +234,8 @@ public class OrviboSocketEmulator implements TimeoutReciever{
 			saveProperties();
 			
 			serverIp 	= InetAddress.getByName("vicenter.orvibo.com");
-			localIP 	= InetAddress.getLocalHost();
-			//broadcastip = InetAddress.getByName("255.255.255.255");
-			
-			System.out.println("Loacal IP : " + localIP);
+			localIP 	= InetAddress.getByName(getNetworkAddress(networkInterface));	
 	
-		//	NetworkInterface network = NetworkInterface.getByInetAddress(localIP);
 			NetworkInterface network = NetworkInterface.getByName(networkInterface);
 	
 			mac = network.getHardwareAddress();
@@ -225,7 +257,6 @@ public class OrviboSocketEmulator implements TimeoutReciever{
 				registerWithServer(InetAddress.getByName(serverDomain));
 			}
 
-			//setupPins(outputs);
 			switchRelay((state==1), 0);
 			
 		} catch (UnknownHostException e) {e.printStackTrace();}
@@ -289,10 +320,10 @@ public class OrviboSocketEmulator implements TimeoutReciever{
 		byte [] timeData =  Utils.longToBytes(Utils.getTimeSince1900());
 		byte [] end2 	=   {timeData[7], timeData[6],  timeData[5],timeData[4], state};
 		
-		if (allOne){
-			tmp				=	Utils.concat(tmp,endAllone);
+		if (modeAllOne){
+			tmp			=	Utils.concat(tmp,endAllone);
 		} else {
-			tmp				=	Utils.concat(tmp,end);
+			tmp			=	Utils.concat(tmp,end);
 		}
 		tmp				=	Utils.concat(tmp,end2);
 		
@@ -308,12 +339,10 @@ public class OrviboSocketEmulator implements TimeoutReciever{
 		tmp				=	Utils.concat(tmp,	twenties);
 		byte [] end 	=   {0x53,0x4f,0x43,0x30,0x30,0x32};
 		byte [] endAllone  	= {0x49, 0x52, 0x44, 0x30, 0x30, 0x35};
-		//byte [] end  	=   {0x49, 0x52, 0x44, 0x30, 0x30, 0x35};
-		//byte [] end2 = {(byte)0xd3,(byte)0xef,0x02,(byte)0xda,state};
 		byte [] timeData =  Utils.longToBytes(Utils.getTimeSince1900());
 		byte [] end2 	=   {timeData[7], timeData[6],  timeData[5],timeData[4], state};
 		
-		if (allOne){
+		if (modeAllOne){
 			tmp			=	Utils.concat(tmp,endAllone);
 		} else {
 			tmp			=	Utils.concat(tmp,end);
@@ -324,7 +353,7 @@ public class OrviboSocketEmulator implements TimeoutReciever{
 	}
 
 	/*
-	public void subscribeUnknown(InetAddress ipAddress, byte[] macAddr){
+	public void subscribeAlternte(InetAddress ipAddress, byte[] macAddr){
 		byte [] start = {0x63, 0x6c};
 		byte [] tmp	=	Utils.concat(start,macAddr);
 		tmp		=	Utils.concat(tmp,twenties);
@@ -369,68 +398,32 @@ public class OrviboSocketEmulator implements TimeoutReciever{
 		
 		int table = rxbytes[22];
 		
-		//68:64:00:24:72:74:ac:cf:23:35:45:98:20:20:20:20:20:20:02:00:00:00:00:01:00:01:00:00:06:00:04:00:04:00:02:00
-		//68:64:00:a8:72:74:ac:cf:23:35:45:98:20:20:20:20:20:20:02:00:00:00:00:04:00:01:00:00:8a:00:01:00:43:25:ac:cf:23:35:45:98:20:20:20:20:20:20:98:45:35:23:cf:ac:20:20:20:20:20:20:38:38:38:38:38:38:20:20:20:20:20:20:53:6f:63:6b:65:74:20:20:20:20:20:20:20:20:20:20:04:00:20:00:00:00:10:00:00:00:05:00:00:00:10:27:2a:79:6f:d0:10:27:76:69:63:65:6e:74:65:72:2e:6f:72:76:69:62:6f:2e:63:6f:6d:20:20:20:20:20:20:20:20:20:20:20:20:20:20:20:20:20:20:20:20:20:c0:a8:01:c8:c0:a8:01:01:ff:ff:ff:00:01:01:00:00:00:ff:00:00
-		//68:64:00:A8:72:74:A8:20:66:3A:34:20:20:20:20:20:20:20:02:00:00:00:00;04:00:01:00:00:8A:00:01:00:43:25:A8:20:66:3A:34:20:20:20:20:20:20:20:20:34:3A:66:20:A8:20:20:20:20:20:20:38:38:38:38:38:38:20:20:20:20:20:20:53:6F:63:6B:65:74:31:20:20:20:20:20:20:20:20:20:04:00:20:00:00:00:10:00:00:00:05:00:00:00:10:27:2A:79:6F:D0:10:27:76:69:63:65:6E:74:65:72:2E:6F:727669626F2E636F6D202020202020202020202020202020202020202020C0A801 C8 C0 A8 01 01 FF FF FF 00 01 01 00 00 00 FF 00 00
-		//68 64 00 A5 74 6D A8 20 66 3A 34 20 20 20 20 20 20 20000000000400018A0001004325A820663A342020202020202020343A6620A82020202020203838383838382020202020205261737069536F632020202020202020040020000000100000000500000010272A796FD01027766963656E7465722E6F727669626F2E636F6D202020202020202020202020202020202020202020                                                                                                         C0 A8 01 50 C0 A8 02 01 FF FF FF 00 01 00 00 00 00 FF 00 00
-		
 		byte [] start 	=   {0x72, 0x74};
 		byte [] tmp		=	Utils.concat(start,	mac);
 		tmp				=	Utils.concat(tmp,	twenties);
 		
 		if (table==1){
 			//TABLE 1
-			//	byte [] end1 =   {2,0,0,0,0,1,0,1,0,0,6,0,4,0,4,0,2,0};
-			byte [] end1 =   {2,0,0,0,0,1,0,1,0,0,6,0,4,0,4,0,2,0};
-			//6864001D7274A820663A3420202020202020 00 00 00 00 01 000000000000
-			//686400247274A820663A3420202020202020 02 00 00 00 00 010001000006 00040004000200
-			//6864002C7274ACCF232419C0202020202020 02 00 00 00 00 010001000006 00040004001700 0600030003000200
+			byte [] end1 =   {02,00,0,0,0,1,0,(byte)(state+1),0,0,6,0,4,0,4,0,2,0};
 			tmp		=	Utils.concat(tmp,end1);
 			
 		} else if (table==3){
 			//TABLE 3
-			/*
-			 *  02 00                                                           - Record ID Little Endian = 02
-                00 00 00                                                        - ??? Unknown ???
-                03                                                              - Table Number
-                00 01 00 00                                                     - ??? Unknown ???
-                1C 00                                                           - Record Length Little Endian = 28bytes
-                01 00                                                           - Record Number Little Endian = 1
-                E2 72 80 00 63 0E 00 00 00 5C DE 16 00 A0 19 00                 - ??? Unknown ???
-                01 00                                                           - Power state = on (00 = off, 01 = on)
-                DE 07                                                           - Year Little Endian = 2014
-                07                                                              - Month = 7
-                0D                                                              - Day = 13
-                10                                                              - Hour - 2? = 18 = 6pm
-                00                                                              - Minute = 00
-                00                                                              - Second = 00
-                FF                 
-			 */
 			tmp		=	Utils.concat(tmp,new byte []{2,0}); 	// Record ID Little Endian = 02
 			tmp		=	Utils.concat(tmp,new byte []{0,0,0}); 	// Unknown
 			tmp		=	Utils.concat(tmp,new byte []{0x03});	// Table Number
-			tmp		=	Utils.concat(tmp,new byte []{0,1,0,0}); // ??? Unknown ???
+			tmp		=	Utils.concat(tmp,new byte []{0,(byte)(state+1),0,0}); // ??? Unknown ???
 			tmp		=	Utils.concat(tmp,new byte []{0x1c,0});  // Record Length Little Endian = 28bytes
 			tmp		=	Utils.concat(tmp,new byte []{1,0}); 	// Record Number Little Endian = 1
 			tmp		=	Utils.concat(tmp,new byte []{(byte)0xE2 ,0x72 ,(byte)0x80, 0 ,0x63 ,0x0E, 0, 0, 0, 0x5C ,(byte)0xDE ,0x16, 00, (byte)0xA0, 0x19, 00}); //??? Unknown ???
 			tmp		=	Utils.concat(tmp,new byte []{state,0}); // Power state = on (00 = off, 01 = on)
-			
-			//int year = Calendar.getInstance().get(Calendar.YEAR);
-			//int month = Calendar.getInstance().get(Calendar.MONTH);
-			//int date = Calendar.getInstance().get(Calendar.DATE);
-			
-			//ByteBuffer.allocate(2).putInt(year).array();
-			
 			tmp		=	Utils.concat(tmp,new byte []{(byte)0xDE ,7,7,0x0d,0x10,0,0,(byte)0xff,0x1C ,0,2,0,(byte)0xE2,0x72,(byte) 0x80,0,0x71,0x0F,0, 0, 0x50, 0x72, (byte) 0xD2, 0x16, 00 ,(byte) 0xA0, 0x19, 0,0,0,(byte)0xde,07,7,0x0d,0x13,0,0,(byte)0xff});
-			
-//			byte [] end1 =   {2,0,0,0,0,3,0,1,0,0,0x1c,0,1,0,(byte)0xE2 ,0x72 ,(byte)0x80, 0 ,0x63 ,0x0E, 0, 0, 0, 0x5C ,(byte)0xDE ,0x16, 00, (byte)0xA0, 0x19, 00,state,0,(byte)0xDE ,7,7,0x0d,0x10,0,0,(byte)0xff,0x1C ,0,2,0,(byte)0xE2,0x72,(byte) 0x80,0,0x71,0x0F,0, 0, 0x50, 0x72, (byte) 0xD2, 0x16, 00 ,(byte) 0xA0, 0x19, 0,0,0,(byte)0xde,07,7,0x0d,0x13,0,0,(byte)0xff};
-			//tmp		=	Utils.concat(tmp,end1);
 			
 		} else {
 			
 			//TABLE 4
 			try {
-				byte[] end2 =  {2,0,0,0,0,4,0,1,0,0,(byte)0x8a,0,1,0,0x43,0x25};
+				byte[] end2 =  {1,0,0,0,0,4,0,1,0,0,(byte)0x8a,0,1,0,0x43,0x25};
 				tmp			=	Utils.concat(tmp,end2);
 				tmp			=	Utils.concat(tmp,mac);
 				tmp			=	Utils.concat(tmp,twenties);
@@ -439,19 +432,17 @@ public class OrviboSocketEmulator implements TimeoutReciever{
 				tmp			=	Utils.concat(tmp,(password + PAD16).substring(0, 12).getBytes());
 				tmp			=	Utils.concat(tmp,(deviceName + PAD16).substring(0, 16).getBytes());
 	
-				byte [] end4 =  {0x01,0x00};//byte [] end4 =  {0x05,0x02};
-				//byte [] end5 =  {0x20,0x00,0x00,0x00,0x10,0x00,0x00,0x00,0x05,0x00,0x00,0x00};
-				byte [] end5 =  {0x30,0x00,0x00,0x00,0x10,0x00,0x00,0x00,0x05,0x00,0x00,0x00};
+				byte [] end4 =  {0x04,0x00};//byte [] end4 =  {0x05,0x02}; - is this really the Icon?
+				byte [] end5 =  {0x20,0x00,0x00,0x00,0x10,0x00,0x00,0x00,0x05,0x00,0x00,0x00};
 				byte [] end10 =  {(byte)0xff,(byte)0xff,(byte)0xff,0x00}; //netmask
-				byte [] end11 =  {1,discoverable,(byte)dst,(byte)timezone,0,(byte)0xff,0,0};
-	 
+				byte [] end11 =  {1,discoverable,(byte)dst,(byte)timezone,0,(byte)0xff,0,0,0,0,0,0}; //4 bytes missing?
 				tmp		=	Utils.concat(tmp,end4);
 				tmp		=	Utils.concat(tmp,end5);
 				tmp		=	Utils.concat(tmp,PORT10K);
 				tmp		=	Utils.concat(tmp,InetAddress.getByName(serverDomain).getAddress());
 				tmp		=	Utils.concat(tmp,PORT10K);
 				tmp		=	Utils.concat(tmp,(serverDomain + PAD40).substring(0, 40).getBytes());
-				tmp		=	Utils.concat(tmp,InetAddress.getLocalHost().getAddress());
+				tmp		=	Utils.concat(tmp,InetAddress.getByName(getNetworkAddress(networkInterface)).getAddress());
 				tmp		=	Utils.concat(tmp,InetAddress.getByName(gateway).getAddress());
 				tmp		=	Utils.concat(tmp,end10);
 				tmp		=	Utils.concat(tmp,end11);
@@ -460,7 +451,7 @@ public class OrviboSocketEmulator implements TimeoutReciever{
 				return ;
 			}
 		}
-																																																																														//TS TZ
+																																																																					//TS TZ
 		sendMessage(tmp,ipAddress);
 	}
 	
@@ -470,8 +461,9 @@ public class OrviboSocketEmulator implements TimeoutReciever{
 		
 		System.out.println("Mod Table!");
 		if (table==1) {
-			
+			//TODO: implement Table 1 if necessary
 		} else if (table==3) {
+			//TODO: implement Table 3 if necessary
 			//68 64 00 37 74 6D A8 20 66 3A 34 20 20 20 20 20 20 20 00 00 00 00 0300001C001158202020202020202020202020202020200000DF070B1D111437FF
 		} else if (table==4) {
 			String newDeviceName=   "";
@@ -521,9 +513,6 @@ public class OrviboSocketEmulator implements TimeoutReciever{
 		}
 	}
 	
-	
-	
-	
 	public void switchRelay(boolean state,int pinIndex) {
 		
 		if (outputPins.isEmpty()) {
@@ -538,33 +527,32 @@ public class OrviboSocketEmulator implements TimeoutReciever{
 		} 
 	}
 	
-	
-	public void changeState(InetAddress ipAddress,byte[] rxbytes) {
-
-		//6864001E6463A820663A342020202020202000000000CD01 00 2A 004EA3E9
-	    //686400176463A820663A34202020202020200000000001
-		int sw 	= 0;
-		
-		if (rxbytes.length==30){
-			sw 	= (rxbytes[25] - 0x2a);
-			state = rxbytes[24];
-			System.out.println("Switch : " + sw + " \t State " + state);
-			//byte [] req = {rxbytes[22],rxbytes[23],rxbytes[24],rxbytes[25],rxbytes[26],rxbytes[27],rxbytes[28],rxbytes[29]};
-		} else {
-			state = rxbytes[22];
-		}
-
+	public void updateClients() {
 		for(String key:subscribers.keySet()){
 			SocketClient sc = subscribers.get(key);
 			System.out.println("Sending state "+state+" to subscriber " + sc.getInetAddress().getHostAddress() + ":" + sc.getPort());	
 			powerResponse(sc.getInetAddress(),(byte)0);
 			powerResponseConfirm(sc.getInetAddress(), sc.getPort());
 		}
+	}
 	
+	public void changeState(InetAddress ipAddress,byte[] rxbytes) {
+
+		//00000000CD01002A004EA3E9 // AllOne
+	    //0000000001 //S20
+		int sw 	= 0;
+		
+		if (rxbytes.length == 30) {
+			sw 	= (rxbytes[25] - 0x2a);
+			state = rxbytes[24];
+			System.out.println("Switch : " + sw + " \t State " + state);
+		} else {
+			state = rxbytes[22];
+		}
+
+		updateClients();
 		switchRelay((state==1), sw);
-	
-		/////powerResponse(ipAddress,(byte)0);
-		/////powerResponseConfirm(ipAddress, port);
+
 	}
 	
 	public void powerResponse(InetAddress ipAddress, byte state){
@@ -671,7 +659,7 @@ public class OrviboSocketEmulator implements TimeoutReciever{
 						byte[] rxbytes = new byte [receivePacket.getLength()];
 						System.arraycopy(receiveData, 0, rxbytes, 0, receivePacket.getLength());
 						OrviboCmd cmd = OrviboCmd.valueOf(rxbytes,4);
-					   
+						System.out.println("RX ["+ cmd.toString() + "] FROM "+ iPAddress + ":" +receivePacket.getPort() + "\t"  + Utils.bytesToHex(rxbytes));
 						switch (cmd) {
 					  
 							case MSG_QUERY_ALL :
@@ -691,7 +679,6 @@ public class OrviboSocketEmulator implements TimeoutReciever{
 					
 					   		case MSG_SUB_CNF:
 					   			addUpdateClient(iPAddress, receivePacket.getPort());
-					   			System.out.println("Subscribe!");
 					   			subscribeResponse(iPAddress);
 					   			break;
 					   			
