@@ -20,7 +20,7 @@ networkInterface  = wlan0
 
 deviceName        = PiSocket
 
-passwoprd         = 888888
+password         = 888888
 
 discoverable      = 0
 
