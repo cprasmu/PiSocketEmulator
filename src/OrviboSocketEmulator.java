@@ -37,13 +37,14 @@ import com.pi4j.io.gpio.RaspiPin;
 public class OrviboSocketEmulator implements TimeoutReciever{
 	
 	private static  InetAddress 	serverIp; 
+	private InetAddress broadcastAddress;
 	private static final String 	PAD16			= "                ";
 	private static final String 	PAD40			= "                                        ";
 	private static final byte [] 	PORT10K 		= {0x10,0x27};
 	private DatagramSocket  		scktServer ; 		// For receiving data
 	private InetAddress 			localIP; 			// Get our local IP address	
 	private Timer 					heartbeatSender  = null;
-	
+	private Timer 					broadcastSender  = null;
 	//Properties
 	private Properties 				properties 		= new Properties(); 
 	public static final String 		PROP_PASWD  	= "password";
@@ -67,7 +68,7 @@ public class OrviboSocketEmulator implements TimeoutReciever{
     private int 					dst 			= 0;
     private byte 					discoverable 	= (byte)1;
     private boolean 				useServer 		= false;
-    
+    private static 		InetAddress NTP_SERVER;
     
 	private Thread listener;
 	private String networkInterface 				= "wlan0";
@@ -235,10 +236,16 @@ public class OrviboSocketEmulator implements TimeoutReciever{
 			
 			serverIp 	= InetAddress.getByName("vicenter.orvibo.com");
 			localIP 	= InetAddress.getByName(getNetworkAddress(networkInterface));	
-	
+			NTP_SERVER  = InetAddress.getByName("ntp.apple.com");
 			NetworkInterface network = NetworkInterface.getByName(networkInterface);
-	
+			
 			mac = network.getHardwareAddress();
+			
+			byte[] bc = localIP.getAddress();
+			bc[3]=(byte) 255;
+			
+			broadcastAddress = InetAddress.getByAddress(bc);
+	
 			
 			macRev[5]	= mac[0];
 			macRev[4]	= mac[1];
@@ -247,27 +254,44 @@ public class OrviboSocketEmulator implements TimeoutReciever{
 			macRev[1]	= mac[4];
 			macRev[0]	= mac[5];
 			
+			
+			
 			scktServer 	= new DatagramSocket(port);
 			listener 	= new Thread(new Listener());
 			listener.start();
 			
 			if (useServer) {
 				heartbeatSender = new Timer("Heartbeat Timer",true); 
-				heartbeatSender.schedule(new SenderTask(), 30000,30000);
-				registerWithServer(InetAddress.getByName(serverDomain));
+				heartbeatSender.schedule(new ServerTask(), 0,30000);
 			}
-
+			
+			broadcastSender = new Timer("Broadcast Timer",true); 
+			broadcastSender.schedule(new BroadcastTask(), 0,3000);
+			
 			switchRelay((state==1), 0);
 			
 		} catch (UnknownHostException e) {e.printStackTrace();}
 		
 	}
 	
-	private class SenderTask extends TimerTask {
+	private class ServerTask extends TimerTask {
 		
         public void run() {
         	try{
         		registerWithServer(InetAddress.getByName(serverDomain));
+        		addUpdateClient(InetAddress.getByName(serverDomain), 10000);
+    		}
+    		catch (Exception ex){
+    			ex.printStackTrace();
+    		}
+        }
+    }
+	
+	private class BroadcastTask extends TimerTask {
+		
+        public void run() {
+        	try{
+        		queryAllResposne(broadcastAddress);
     		}
     		catch (Exception ex){
     			ex.printStackTrace();
@@ -364,6 +388,14 @@ public class OrviboSocketEmulator implements TimeoutReciever{
 	}
 	*/
 	
+	private void sendNTPRequest() {
+		//dst port 123
+		//db00 04fa 00 00 00 00 00 01 03 fe 000000000000000000000000000000000000000000000000000000000000000000000000
+		byte [] start = {(byte)0xdb, 0x00,0x04,(byte)0xfa, 0x00 ,0x00 ,0x00 ,0x00 ,0x00,0x01 ,0x03 ,(byte)0xfe ,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00};
+		sendMessage(start,NTP_SERVER,123);
+	}
+	
+	//broadcast message every 3 secs?
 	public void subscribeResponse(InetAddress ipAddress){
 
 		byte [] start 	=   {0x63, 0x6c};
