@@ -86,7 +86,7 @@ public class OrviboSocketEmulator implements TimeoutReciever{
 	private volatile HashMap<String,SocketClient> subscribers = new HashMap<String,SocketClient>();
 	//GPIO
 	private final  GpioController 	gpio 			= GpioFactory.getInstance();
-	private ArrayList<GpioPinDigitalOutput> outputPins = new ArrayList<GpioPinDigitalOutput>();
+	private ArrayList<GpioPinDigitalOutput> outputPins;
 	
 	
 	private void addUpdateClient(InetAddress ipAddress,int port) {
@@ -231,6 +231,8 @@ public class OrviboSocketEmulator implements TimeoutReciever{
 		
 		try {
 
+			outputPins = new ArrayList<GpioPinDigitalOutput>();
+			
 			loadProperties();
 			saveProperties();
 			

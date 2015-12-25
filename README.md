@@ -1,6 +1,7 @@
 # PiSocketEmulator
 Raspberry Pi Emulation of Orvibo S20 Socket
 
+Thanks to Andrius Štikonas https://stikonas.eu/wordpress/author/andrius/ for his work on reverse engineering this device.
 
 Getting started
 ===============
@@ -49,12 +50,13 @@ Please remember that this is beta software. It has been built and tested against
 To-Do:
 ======
 
-* Implement Tables 1 & 3
-* AllOne mode switch response
-* Acknowledge password change messages
-* Fix initial state issues
-* Implement use of password
-* Icon change?
+ - [ ] Implement Tables 1 & 3
+ - [ ] AllOne mode switch response
+ - [ ] Acknowledge password change messages
+ - [ ] Fix initial state issues
+ - [ ] Implement use of password
+ - [ ] Icon change?
+
 
 
 Supporting development
